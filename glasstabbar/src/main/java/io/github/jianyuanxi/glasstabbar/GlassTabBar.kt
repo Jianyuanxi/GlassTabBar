@@ -54,6 +54,7 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
@@ -74,6 +75,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import com.kyant.shapes.Capsule
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -123,11 +125,13 @@ fun rememberGlassBackdrop(background: Color): LayerBackdrop {
  *
  * - 胶囊本身：底下的页面经模糊 + 折射透上来，边缘一圈高光，下面一层软阴影。
  * - 选中块：平时是一颗中性灰白的半透明小胶囊（参照 iOS 26 App Store，不用强调色）；手指一按下就浮起成透明水滴、滑到按着的那格，放大底下的图标；
+ *   水滴按 App Store 录屏的比例（约 1.26 格宽、上下探出底栏），强调色只出现在水滴盖住的地方。
  *   拖动时跟着手指，每划过一格轻震一下，松手贴到最近的一格。点别的格也一样：水滴放大着「拉丝」过去
  *   （前沿快、后沿慢），快到了才缩回去贴合。
  * - 页面往下滚时底栏收窄变矮、只留图标（[minimized]），往回滚或切页时展开。
  * - 点当前这格 = [onReselect]（各页用来滚回顶部）。
- * - [glass] 0..1 调玻璃强弱（模糊和折射一起变），[haptics] 关掉后不震。
+ * - [glass] 0..1 调玻璃强弱（模糊和折射一起变），[lift] 把底栏往上抬（负的往下压），
+ *   [pull] 0..1 是水滴边缘靠近旁边的字时朝它鼓出去的强度（0 = 不鼓），[haptics] 关掉后不震。
  * - [dark] 决定玻璃用深色还是浅色那套；App 自己有深浅色开关时传进来。
  */
 @Composable
@@ -140,6 +144,8 @@ fun GlassTabBar(
     dark: Boolean = isSystemInDarkTheme(),
     colors: GlassTabBarColors = GlassTabBarDefaults.colors(dark),
     glass: Float = 0.5f,
+    lift: Dp = 0.dp,
+    pull: Float = 0.5f,
     haptics: Boolean = true,
     onReselect: (Int) -> Unit = {},
     onPick: (Int) -> Unit,
@@ -160,9 +166,10 @@ fun GlassTabBar(
     val rim = if (dark) listOf(Color.White.copy(alpha = 0.28f), Color.White.copy(alpha = 0.06f))
     else listOf(Color.White.copy(alpha = 0.95f), Color.Black.copy(alpha = 0.10f))
 
-    // 图标层单独录一份，水滴从「页面 + 图标」合成的底图取样，按住时能看到图标被放大
-    val iconLayer = rememberLayerBackdrop()
-    val lensSource = rememberCombinedBackdrop(backdrop, iconLayer)
+    // 另录一份全部是选中样式（实心 + 强调色）的图标层，不上屏，只给水滴取样：
+    // 水滴盖到哪儿，哪儿的图标就变强调色，半盖着就半边变色（照 iOS 26 App Store）
+    val accentLayer = rememberLayerBackdrop()
+    val lensSource = rememberCombinedBackdrop(backdrop, accentLayer)
 
     // 选中块左右两条边，单位是「格」
     val left = remember { Animatable(selected.toFloat()) }
@@ -171,6 +178,9 @@ fun GlassTabBar(
     val press = remember { Animatable(0f) }
     // 手指按下到水滴落定这段时间由手势自己驱动选中块，外面 selected 变了不另外滑
     var held by remember { mutableStateOf(false) }
+    // 水滴外的图标显不显示选中色。水滴开始收回前就放开，让底下的图标和水滴里的同时是强调色，
+    // 不然收回那一下会「强调色 → 灰 → 强调色」闪一次
+    var lit by remember { mutableStateOf(true) }
     var settle by remember { mutableStateOf<Job?>(null) }
     val lensOn by remember { derivedStateOf { press.value > 0.01f } }
     val mini by animateFloatAsState(if (minimized) 1f else 0f, spring(0.82f, 380f), label = "mini")
@@ -184,7 +194,8 @@ fun GlassTabBar(
     BoxWithConstraints(
         modifier
             .navigationBarsPadding()
-            .padding(horizontal = lerp(20.dp, 64.dp, mini), vertical = BarGap)
+            .padding(horizontal = lerp(20.dp, 64.dp, mini))
+            .padding(top = BarGap, bottom = (BarGap + lift).coerceAtLeast(0.dp))
             .fillMaxWidth()
             .height(lerp(BarHeight, MiniHeight, mini)),
     ) {
@@ -211,10 +222,10 @@ fun GlassTabBar(
                         InnerShadow.Default.copy(radius = 10.dp, offset = DpOffset(0.dp, 2.dp),
                             color = if (dark) Color.Black else Color(0xFF6E6E73), alpha = if (dark) 0.45f else 0.16f)
                     },
-                    // 按住时整条胶囊微微鼓起
+                    // 按住时整条胶囊鼓起，主要往两边撑
                     layerBlock = {
                         val p = press.value
-                        scaleX = 1f + 0.008f * p
+                        scaleX = 1f + 0.03f * p
                         scaleY = 1f + 0.02f * p
                     },
                     onDrawSurface = { drawRect(surface) },
@@ -235,6 +246,7 @@ fun GlassTabBar(
                         // 按下就浮起水滴，并且立刻滑到手指按着的那格（不是停在原来选中的那格）
                         settle?.cancel()
                         held = true
+                        lit = false
                         scope.launch { press.animateTo(1f, spring(0.55f, 600f)) }
                         scope.launch { slide(left, right, start) }
                         var drag = false
@@ -272,6 +284,7 @@ fun GlassTabBar(
                             launch { slide(left, right, target) }
                             snapshotFlow { abs(left.value - target) < 0.12f && abs(right.value - target - 1f) < 0.12f }
                                 .first { it }
+                            lit = true
                             press.animateTo(0f, spring(0.6f, 380f))
                             held = false
                         }
@@ -304,36 +317,63 @@ fun GlassTabBar(
                     )
                 },
             )
-            Row(Modifier.fillMaxSize().layerBackdrop(iconLayer), horizontalArrangement = Arrangement.SpaceEvenly) {
+            // 底下的图标按住时一动不动，只有水滴里的那份被放大、折射
+            Row(Modifier.fillMaxSize().graphicsLayer { alpha = 0f }.layerBackdrop(accentLayer), horizontalArrangement = Arrangement.SpaceEvenly) {
+                tabs.forEach { t -> TabCell(t, true, 1f - mini, colors, Modifier.weight(1f), ghost = true) {} }
+            }
+            Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.SpaceEvenly) {
                 tabs.forEachIndexed { i, t ->
-                    TabCell(t, i == selected, 1f - mini, colors, Modifier.weight(1f)) { if (i == selected) again(i) else pick(i) }
+                    // 按住时强调色只留在水滴里，水滴外的图标都是普通色
+                    TabCell(t, i == selected && lit, 1f - mini, colors, Modifier.weight(1f)) {
+                        if (i == selected) again(i) else pick(i)
+                    }
                 }
             }
         }
         if (lensOn) {
-            // 水滴：比格子大一圈、上下探出胶囊，透明玻璃 + 折射 + 色散 + 边缘高光
+            // 水滴：上下探出胶囊，透明玻璃 + 折射 + 色散 + 边缘高光。
+            // 外形用连续曲率胶囊（两头不是正半圆）；按住时按 App Store 的比例（[DropCells]、[DropAspect]），
+            // 滑动时被拉长、略变矮。
             Box(
                 Modifier
                     .layout { m, cons ->
                         val cw = cons.maxWidth / n.toFloat()
                         val p = press.value
-                        val grow = 6.dp.toPx() * p
+                        val grow = 5.dp.toPx() * p
                         val inset = 5.dp.toPx() * (1f - p)
                         val (a, b) = span(left.value, right.value, cw, inset)
-                        val x0 = a - grow
-                        val x1 = b + grow
-                        val h = cons.maxHeight - 2 * inset + 2 * grow
-                        val w = (x1 - x0).coerceAtLeast(h)
+                        val base = cw - 2 * inset
+                        val extra = (b - a - base).coerceAtLeast(0f)
+                        val h0 = (cons.maxHeight - 2 * inset + 2 * grow) * (1f - 0.15f * (extra / base).coerceIn(0f, 1f) * p)
+                        // 静止时就是选中块的宽；浮起后过渡到 App Store 的比例 + 滑动拉长的部分
+                        val full = minOf(DropCells * cw, h0 * DropAspect) + extra
+                        val w0 = (b - a) + (full - (b - a)) * p
+                        val mid = (a + b) / 2
+                        // 边缘被旁边的字吸过去：哪侧的边快碰到图标，那侧的边就朝它鼓出去，碰上后松开。
+                        // 只改外形，不动中心，拖动快慢照旧由手指决定
+                        var reachL = 0f
+                        var reachR = 0f
+                        for (i in 0 until n) {
+                            val dx = (i + 0.5f) * cw - mid
+                            val f = reach((abs(dx) - w0 / 2) / cw)
+                            if (dx > 0) reachR = maxOf(reachR, f) else reachL = maxOf(reachL, f)
+                        }
+                        val k = 0.25f * cw * pull * p
+                        val x0 = mid - w0 / 2 - reachL * k
+                        val x1 = mid + w0 / 2 + reachR * k
+                        val w = x1 - x0
+                        val h = h0 * (1f - 0.08f * maxOf(reachL, reachR) * pull * p)
                         val placeable = m.measure(Constraints.fixed(w.roundToInt(), h.roundToInt()))
                         layout(cons.maxWidth, cons.maxHeight) {
-                            placeable.place((x0 + (x1 - x0 - w) / 2).roundToInt(), ((cons.maxHeight - h) / 2).roundToInt())
+                            placeable.place(x0.roundToInt(), ((cons.maxHeight - h) / 2).roundToInt())
                         }
                     }
                     .drawBackdrop(
                         backdrop = lensSource,
-                        shape = { CircleShape },
+                        shape = { DropShape },
                         effects = {
-                            lens(14.dp.toPx() * press.value, 24.dp.toPx() * press.value, depthEffect = true, chromaticAberration = true)
+                            val p = press.value
+                            lens(size.minDimension * 0.3f * p, 20.dp.toPx() * p, depthEffect = true, chromaticAberration = true)
                         },
                         highlight = { Highlight.Default.copy(alpha = press.value) },
                         shadow = { Shadow.Default.copy(alpha = 0.35f * press.value) },
@@ -363,6 +403,24 @@ private suspend fun slide(left: Animatable<Float, *>, right: Animatable<Float, *
     }
 }
 
+private val DropShape = Capsule()
+// 照 iOS 26 App Store 录屏量的：水滴约 1.26 格宽、宽高比约 1.85、上下各探出底栏约 8%；
+// 格子宽（平板）时按宽高比封顶，免得拉成长条
+private const val DropCells = 1.26f
+private const val DropAspect = 1.85f
+
+/**
+ * 水滴一侧边缘被图标吸过去的程度（0..1），gap 是这侧边缘到图标中心的距离（格）。
+ * 离 0.5 格以内开始鼓，约 0.12 格最强；图标进到水滴里面（gap < 0）就松开。
+ */
+private fun reach(gap: Float): Float {
+    fun smooth(e0: Float, e1: Float, x: Float): Float {
+        val t = ((x - e0) / (e1 - e0)).coerceIn(0f, 1f)
+        return t * t * (3 - 2 * t)
+    }
+    return smooth(0.5f, 0.12f, gap) * smooth(-0.12f, 0.04f, gap)
+}
+
 /** 拖动：跟手但带一点弹簧惯性，前沿比后沿紧，快速甩动时会拉长。 */
 private fun follow(scope: CoroutineScope, left: Animatable<Float, *>, right: Animatable<Float, *>, t: Float) {
     val toRight = t > left.value
@@ -373,18 +431,23 @@ private fun follow(scope: CoroutineScope, left: Animatable<Float, *>, right: Ani
 }
 
 @Composable
-private fun TabCell(t: TabItem, on: Boolean, label: Float, colors: GlassTabBarColors, modifier: Modifier, onClick: () -> Unit) {
+private fun TabCell(
+    t: TabItem, on: Boolean, label: Float, colors: GlassTabBarColors, modifier: Modifier, ghost: Boolean = false,
+    onClick: () -> Unit,
+) {
     val tint by animateColorAsState(if (on) colors.selected else colors.unselected, label = "tint")
     val pop by animateFloatAsState(if (on) 1f else 0.92f, spring(0.42f, 420f), label = "pop")
     Column(
         modifier
             .fillMaxHeight()
-            // 手势由整条栏统一处理（要支持拖动），这里只给读屏补上「标签页」语义
-            .semantics {
-                role = Role.Tab
-                selected = on
-                onClick(t.title) { onClick(); true }
-            },
+            // 手势由整条栏统一处理（要支持拖动），这里只给读屏补上「标签页」语义；水滴取样用的那份不进读屏
+            .then(
+                if (ghost) Modifier else Modifier.semantics {
+                    role = Role.Tab
+                    selected = on
+                    onClick(t.title) { onClick(); true }
+                },
+            ),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {

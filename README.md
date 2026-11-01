@@ -3,7 +3,7 @@
 仿 iOS 26 液态玻璃的 Jetpack Compose 浮动底栏。
 
 - 胶囊底栏：底下页面实时模糊 + 透镜折射 + 提饱和度，边缘高光描边、外投影、内阴影，浅色 / 深色各一套。
-- 选中块：平时是中性灰白小胶囊；按住浮起透明水滴（折射 + 色散），对「页面 + 图标」放大取样。
+- 选中块：平时是中性灰白小胶囊；按住浮起透明水滴（折射 + 色散），比例照 iOS 26 App Store 录屏（约 1.26 格宽、上下探出底栏）。强调色只出现在水滴盖住的地方，半盖住就半边变色；底下的图标不动。
 - 手势：按下水滴立刻滑到那格，拖动跟手、每过一格轻震，松手吸附最近一格；点选时水滴「拉丝」过去（前沿快、后沿慢）。
 - 页面下滚时底栏收窄只留图标；点当前格回调 `onReselect`（用来滚回顶部）。
 - `glass` 0..1 调玻璃强弱，`haptics` 开关震动。
@@ -32,7 +32,7 @@ dependencyResolutionManagement {
 模块 `build.gradle.kts`：
 
 ```kotlin
-implementation("com.github.Jianyuanxi:GlassTabBar:v1.0.0")
+implementation("com.github.Jianyuanxi:GlassTabBar:v1.1.0")
 ```
 
 ## 用法
@@ -66,6 +66,8 @@ Box(Modifier.fillMaxSize().background(bg)) {
 | `dark` | 跟随系统 | App 自己有深浅色开关时传进来 |
 | `colors` | 选中系统绿、没选中系统灰 | `GlassTabBarDefaults.colors(selected = …, unselected = …)` |
 | `glass` | 0.5 | 0..1，模糊 2+8g dp、折射 6+24g / 12+48g dp |
+| `lift` | 0.dp | 底栏离屏幕底边再抬高多少，负的往下压；页面底部内边距要同样加上 |
+| `pull` | 0.5 | 0..1，水滴边缘靠近旁边的字时朝它鼓出去的强度，0 = 不鼓 |
 | `haptics` | true | 关掉后不震 |
 | `onReselect` | 空 | 点当前格 |
 

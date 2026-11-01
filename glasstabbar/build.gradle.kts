@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "com.github.Jianyuanxi"
-version = "1.0.0"
+version = "1.1.0"
 
 android {
     namespace = "io.github.jianyuanxi.glasstabbar"
@@ -40,6 +40,8 @@ dependencies {
     // 调用方要用 LayerBackdrop / layerBackdrop 给页面录层，所以以 api 暴露。
     // 2.x 要求 compileSdk 37 + Kotlin 2.4 / Compose 1.12，先钉 1.0.6
     api("io.github.kyant0:backdrop:1.0.6")
+    // 水滴外形用它的连续曲率胶囊；backdrop 依赖它但编译期不暴露
+    implementation("io.github.kyant0:shapes:1.2.0")
 }
 
 publishing {
